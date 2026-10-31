@@ -1,0 +1,61 @@
+name: Update Market Monitor
+
+on:
+  schedule:
+    - cron: "30 22 * * 1-5"   # 22:30 UTC, Monday-Friday (after the US close)
+  workflow_dispatch:           # adds a "Run workflow" button
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install libraries
+        run: pip install yfinance pandas numpy
+
+      - name: Restore saved price data
+        uses: actions/cache@v4
+        with:
+          path: |
+            mm_cache.pkl
+            mm_tickers.txt
+          key: mm-cache-${{ github.run_id }}
+          restore-keys: mm-cache-
+
+      - name: Build the Market Monitor
+        run: python market_monitor.py
+
+      - name: Prepare web page
+        run: |
+          mkdir site
+          cp market_monitor.html site/index.html
+          cp market_monitor.csv site/
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4
