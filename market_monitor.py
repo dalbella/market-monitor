@@ -379,6 +379,10 @@ def to_html(mm: pd.DataFrame, rows: int, demo: bool) -> str:
         body.append(f"<tr{sep}><td class='date'>{d.month}/{d.day}/{d.year}</td>{tds}</tr>")
 
     note = "<p class='demo'>DEMO DATA – synthetic prices, not the real market.</p>" if demo else ""
+    ny = pd.Timestamp.now(tz="America/New_York")
+    if not demo and mm.index[-1].date() == ny.date() and ny.hour < 16:
+        note += (f"<p class='intra'>Intraday snapshot ({ny:%H:%M} New York time) – today's row uses "
+                 "prices so far and volume is incomplete, so 4% counts will be low until the close.</p>")
     return f"""<!DOCTYPE html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
@@ -415,6 +419,8 @@ def to_html(mm: pd.DataFrame, rows: int, demo: bool) -> str:
  .legend{{font-size:11px;color:#555;margin-top:10px;line-height:1.6}}
  .legend i{{display:inline-block;width:12px;height:12px;vertical-align:middle;margin:0 3px 0 10px}}
  .demo{{color:#c5221f;font-weight:bold}}
+ .intra{{display:inline-block;margin:8px 0 0;padding:6px 10px;border-radius:6px;background:#fbe3b4;
+   color:#8a5300;font-weight:bold;font-size:13px;border:1px solid #f0c27a}}
 </style></head><body>
 <h1>Market Monitor</h1>
 <div>Last update: {mm.index[-1]:%A %d %B %Y} · generated {datetime.now():%Y-%m-%d %H:%M}</div>{note}
