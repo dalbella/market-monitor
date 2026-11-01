@@ -258,6 +258,8 @@ def compute(close: pd.DataFrame, vol: pd.DataFrame, idx: pd.DataFrame) -> pd.Dat
     })
     mm["pbr"] = (mm["up25q"] / mm["dn25q"].replace(0, np.nan)).round(2)   # primary breadth ratio
     mm["phase"] = mm.apply(phase_of, axis=1)
+    # Risk On without a 300+ "up 4%" thrust day = Risk On, but cautious
+    mm["cautious"] = (mm["phase"] == "Risk On") & (mm["up4"] < THRUST_4PCT)
     # need 65+ days of history before the quarter columns mean anything
     return mm.iloc[66:].dropna(subset=["r10"])
 
@@ -330,6 +332,13 @@ def cell_class(key: str, row: pd.Series) -> str:
     return ""
 
 
+CAUTION_TAG = '<span class="tag">Cautious</span>'
+
+
+def state_html(row) -> str:
+    return row["phase"] + (CAUTION_TAG if row.get("cautious", False) else "")
+
+
 def fmt(key, v):
     if key in ("phase", "spy_sma5", "spy_ema21", "spy_sma50"):
         return v
@@ -362,7 +371,7 @@ def to_html(mm: pd.DataFrame, rows: int, demo: bool) -> str:
     for d, row in view.iterrows():
         sep = ' class="msep"' if prev_month and d.month != prev_month else ""
         prev_month = d.month
-        tds = "".join(f'<td class="{cell_class(k, row)}{" phase" if k in ("phase", "spy_sma5", "spy_ema21", "spy_sma50") else ""}">{fmt(k, row[k])}</td>'
+        tds = "".join(f'<td class="{cell_class(k, row)}{" phase" if k in ("phase", "spy_sma5", "spy_ema21", "spy_sma50") else ""}">{state_html(row) if k == "phase" else fmt(k, row[k])}</td>'
                       for k, _, _ in COLS)
         body.append(f"<tr{sep}><td class='date'>{d.month}/{d.day}/{d.year}</td>{tds}</tr>")
 
@@ -393,6 +402,11 @@ def to_html(mm: pd.DataFrame, rows: int, demo: bool) -> str:
  td.pk{{background:#fce8e6}} td.rd{{background:#f2b8b5}}
  td.nt{{background:#fff2cc}}
  td.phase{{font-weight:bold}}
+ td.phase:nth-child(2){{text-align:left;padding-left:12px;min-width:128px;white-space:nowrap}}
+ .tag{{display:inline-block;margin-left:6px;padding:1px 6px;border-radius:9px;background:#fbe3b4;
+   color:#8a5300;font-size:10px;font-weight:bold;text-transform:uppercase;letter-spacing:.3px;
+   vertical-align:middle;border:1px solid #f0c27a}}
+ .box .tag{{font-size:11px;margin-left:8px}}
  tr.msep td{{box-shadow:inset 0 2px 0 #666}}
  tbody tr:hover td{{outline:1px solid #999}}
  .legend{{font-size:11px;color:#555;margin-top:10px;line-height:1.6}}
@@ -402,7 +416,7 @@ def to_html(mm: pd.DataFrame, rows: int, demo: bool) -> str:
 <h1>Market Monitor</h1>
 <div>Last update: {mm.index[-1]:%A %d %B %Y} · generated {datetime.now():%Y-%m-%d %H:%M}</div>{note}
 <div class="sum">
- <div class="box {box_cls}"><span>Market state</span><b>{phase}</b></div>
+ <div class="box {box_cls}"><span>Market state</span><b>{phase}{CAUTION_TAG if last["cautious"] else ""}</b></div>
  <div class="box"><span>Primary breadth ratio</span><b>{fmt('pbr', last['pbr'])}</b></div>
  <div class="box"><span>10-day ratio</span><b>{fmt('r10', last['r10'])}</b></div>
  <div class="box"><span>T2108</span><b>{fmt('t2108', last['t2108'])}</b></div>
@@ -423,6 +437,7 @@ def to_html(mm: pd.DataFrame, rows: int, demo: bool) -> str:
  Primary breadth ratio = up 25% quarter ÷ down 25% quarter.<br>
  <b>Market state:</b> count the coloured cells in the seven Primary Breadth columns.
  More green than red = Risk On, more red than green = Risk Off, equal = Neutral.
+ <span class="tag" style="margin-left:0">Cautious</span> = Risk On, but fewer than {THRUST_4PCT} stocks were up 4%+ that day.
 </div>
 </body></html>"""
 
