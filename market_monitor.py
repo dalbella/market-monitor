@@ -160,7 +160,7 @@ def _download(tickers: list[str], **kw) -> tuple[pd.DataFrame, pd.DataFrame]:
     return close, vol
 
 
-def get_prices(tickers: list[str], full: bool) -> tuple[pd.DataFrame, pd.DataFrame, pd.Series]:
+def get_prices(tickers: list[str], full: bool) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     import yfinance as yf
     warnings.simplefilter("ignore")
 
@@ -185,9 +185,11 @@ def get_prices(tickers: list[str], full: bool) -> tuple[pd.DataFrame, pd.DataFra
     vol = vol.reindex_like(close)
     CACHE.write_bytes(pickle.dumps({"close": close, "vol": vol}))
 
-    spx = yf.download("^GSPC", period=HISTORY, auto_adjust=True, progress=False)["Close"]
-    spx = spx.squeeze().reindex(close.index)
-    return close, vol, spx
+    idx = pd.DataFrame(index=close.index)
+    for col, sym in (("spx", "^GSPC"), ("spy", "SPY")):
+        d = yf.download(sym, period=HISTORY, auto_adjust=True, progress=False)["Close"]
+        idx[col] = d.squeeze().reindex(close.index)
+    return close, vol, idx
 
 
 def demo_prices(n_stocks=3000, n_days=400, seed=7):
@@ -203,11 +205,11 @@ def demo_prices(n_stocks=3000, n_days=400, seed=7):
     vol = pd.DataFrame(rng.lognormal(12.5, 1.0, (n_days, n_stocks)) * (1 + 15 * np.abs(ret)),
                        idx, close.columns)
     spx = pd.Series(4000 * np.exp(np.cumsum(mkt)), idx)
-    return close, vol, spx
+    return close, vol, pd.DataFrame({"spx": spx, "spy": spx / 10})
 
 
 # ----------------------------------------------------------------------------- the monitor
-def compute(close: pd.DataFrame, vol: pd.DataFrame, spx: pd.Series) -> pd.DataFrame:
+def compute(close: pd.DataFrame, vol: pd.DataFrame, idx: pd.DataFrame) -> pd.DataFrame:
     close = close.where(close > 0)
     liquid = (close >= MIN_PRICE) & (vol.rolling(20, min_periods=15).mean() >= MIN_AVG_VOLUME)
 
@@ -245,7 +247,9 @@ def compute(close: pd.DataFrame, vol: pd.DataFrame, spx: pd.Series) -> pd.DataFr
         "dn13_34": down_from_high(34, 0.13),
         "universe": universe,
         "t2108": (100 * above40 / universe.replace(0, np.nan)).round(1),
-        "spx": spx.round(2),
+        "spx": idx["spx"].round(2),
+        "spy_sma5": np.where(idx["spy"].isna(), "",
+                             np.where(idx["spy"] > idx["spy"].rolling(5).mean(), "Above", "Below")),
     })
     mm["pbr"] = (mm["up25q"] / mm["dn25q"].replace(0, np.nan)).round(2)   # primary breadth ratio
     mm["phase"] = mm.apply(phase_of, axis=1)
@@ -260,6 +264,7 @@ COLS = [  # key, header, group
     ("dn4", "Number of stocks down 4% plus today", "p"),
     ("r5", "5 day ratio", "p"),
     ("r10", "10 day ratio", "p"),
+    ("spy_sma5", "SPY vs 5-day SMA", "p"),
     ("up25q", "Number of stocks up 25% plus in a quarter", "p"),
     ("dn25q", "Number of stocks down 25% + in a quarter", "p"),
     ("up25m", "Number of stocks up 25% + in a month", "s"),
@@ -274,7 +279,7 @@ COLS = [  # key, header, group
 ]
 
 
-PRIMARY = ("up4", "dn4", "r5", "r10", "up25q", "dn25q")
+PRIMARY = ("up4", "dn4", "r5", "r10", "spy_sma5", "up25q", "dn25q")
 GREENS, REDS = {"gd", "gb"}, {"rd", "pk"}
 
 
@@ -311,13 +316,15 @@ def cell_class(key: str, row: pd.Series) -> str:
         return "rd" if v >= EXTREME_50PCT else ""
     if key == "dn50m":                     # 20+ stocks down 50% in a month = washout (contrarian green)
         return "gb" if v >= EXTREME_50PCT else ""
+    if key == "spy_sma5":
+        return {"Above": "gb", "Below": "pk"}.get(v, "")
     if key == "t2108":
         return "gb" if v <= T2108_LO else "rd" if v >= T2108_HI else ""
     return ""
 
 
 def fmt(key, v):
-    if key == "phase":
+    if key in ("phase", "spy_sma5"):
         return v
     if pd.isna(v):
         return "–"
@@ -338,7 +345,7 @@ def to_html(mm: pd.DataFrame, rows: int, demo: bool) -> str:
 
     head1 = ('<tr><th rowspan="2" class="date d">Date</th>'
              '<th rowspan="2" class="d">Market state</th>'
-             '<th colspan="6" class="grp p">Primary Breadth Indicators</th>'
+             '<th colspan="7" class="grp p">Primary Breadth Indicators</th>'
              '<th colspan="6" class="grp s">Secondary Breadth Indicators</th>'
              '<th colspan="3" class="grp o"></th></tr>')
     head2 = "<tr>" + "".join(f'<th class="{g}">{h}</th>' for k, h, g in COLS if k != "phase") + "</tr>"
@@ -348,7 +355,7 @@ def to_html(mm: pd.DataFrame, rows: int, demo: bool) -> str:
     for d, row in view.iterrows():
         sep = ' class="msep"' if prev_month and d.month != prev_month else ""
         prev_month = d.month
-        tds = "".join(f'<td class="{cell_class(k, row)}{" phase" if k == "phase" else ""}">{fmt(k, row[k])}</td>'
+        tds = "".join(f'<td class="{cell_class(k, row)}{" phase" if k in ("phase", "spy_sma5") else ""}">{fmt(k, row[k])}</td>'
                       for k, _, _ in COLS)
         body.append(f"<tr{sep}><td class='date'>{d.month}/{d.day}/{d.year}</td>{tds}</tr>")
 
@@ -407,7 +414,7 @@ def to_html(mm: pd.DataFrame, rows: int, demo: bool) -> str:
  4% moves also need volume ≥ {MIN_DAY_VOLUME:,} and above the prior day.
  Quarter = 65 trading days, month = 20. Up X% = close vs lowest close in the window; down X% = close vs highest close.
  Primary breadth ratio = up 25% quarter ÷ down 25% quarter.<br>
- <b>Market state:</b> count the coloured cells in the six Primary Breadth columns.
+ <b>Market state:</b> count the coloured cells in the seven Primary Breadth columns.
  More green than red = Risk On, more red than green = Risk Off, equal = Neutral.
 </div>
 </body></html>"""
@@ -424,13 +431,13 @@ def main():
     a = ap.parse_args()
 
     if a.demo:
-        close, vol, spx = demo_prices()
+        close, vol, idx = demo_prices()
     else:
         tickers = load_universe(a.tickers)
         print(f"Universe: {len(tickers)} tickers")
-        close, vol, spx = get_prices(tickers, a.full)
+        close, vol, idx = get_prices(tickers, a.full)
 
-    mm = compute(close, vol, spx)
+    mm = compute(close, vol, idx)
     if mm.empty:
         sys.exit("Not enough history to compute the monitor.")
 
