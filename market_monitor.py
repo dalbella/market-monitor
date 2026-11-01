@@ -277,6 +277,7 @@ COLS = [  # key, header, group
     ("r5", "5 day ratio", "p"),
     ("r10", "10 day ratio", "p"),
     ("spy_sma5", "SPY vs 5-day SMA", "p"),
+    ("qqq_sma5", "QQQ vs 5-day SMA", "p"),
     ("up25q", "Number of stocks up 25% plus in a quarter", "p"),
     ("dn25q", "Number of stocks down 25% + in a quarter", "p"),
     ("up25m", "Number of stocks up 25% + in a month", "s"),
@@ -287,7 +288,6 @@ COLS = [  # key, header, group
     ("dn13_34", "Number of stocks down 13% + in 34 days", "s"),
     ("spy_ema21", "SPY vs 21-day EMA", "s"),
     ("spy_sma50", "SPY vs 50-day SMA", "s"),
-    ("qqq_sma5", "QQQ vs 5-day SMA", "s"),
     ("qqq_ema21", "QQQ vs 21-day EMA", "s"),
     ("universe", "Stock universe (liquid)", "o"),
     ("t2108", "T2108 (% above 40-day MA)", "o"),
@@ -295,7 +295,7 @@ COLS = [  # key, header, group
 ]
 
 
-PRIMARY = ("up4", "dn4", "r5", "r10", "spy_sma5", "up25q", "dn25q")
+PRIMARY = ("up4", "dn4", "r5", "r10", "spy_sma5", "qqq_sma5", "up25q", "dn25q")
 GREENS, REDS = {"gd", "gb"}, {"rd", "pk"}
 
 
@@ -368,8 +368,8 @@ def to_html(mm: pd.DataFrame, rows: int, demo: bool) -> str:
 
     head1 = ('<tr><th rowspan="2" class="date d">Date</th>'
              '<th rowspan="2" class="d">Market state</th>'
-             '<th colspan="7" class="grp p">Primary Breadth Indicators</th>'
-             '<th colspan="10" class="grp s">Secondary Breadth Indicators</th>'
+             '<th colspan="8" class="grp p">Primary Breadth Indicators</th>'
+             '<th colspan="9" class="grp s">Secondary Breadth Indicators</th>'
              '<th colspan="3" class="grp o"></th></tr>')
     head2 = "<tr>" + "".join(f'<th class="{g}">{h}</th>' for k, h, g in COLS if k != "phase") + "</tr>"
 
@@ -448,7 +448,7 @@ def to_html(mm: pd.DataFrame, rows: int, demo: bool) -> str:
  4% moves also need volume ≥ {MIN_DAY_VOLUME:,} and above the prior day.
  Quarter = 65 trading days, month = 20. Up X% = close vs lowest close in the window; down X% = close vs highest close.
  Primary breadth ratio = up 25% quarter ÷ down 25% quarter.<br>
- <b>Market state:</b> count the coloured cells in the seven Primary Breadth columns.
+ <b>Market state:</b> count the coloured cells in the eight Primary Breadth columns.
  More green than red = Risk On, more red than green = Risk Off, equal = Neutral.
  <span class="tag" style="margin-left:0">Cautious</span> = Risk On, but the 10-day ratio is below {CAUTION_R10} or SPY or QQQ is below its 5-day SMA.
 </div>
