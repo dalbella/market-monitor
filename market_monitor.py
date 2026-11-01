@@ -69,7 +69,7 @@ TICKER_CACHE = Path("mm_tickers.txt")
 THRUST_4PCT = 300          # 300+ stocks up (or down) 4% in a day = notable thrust
 RATIO_HI, RATIO_LO = 2.0, 0.5
 CAUTION_R10 = 1.5          # Risk On is "Cautious" if the 10-day ratio is below this...
-                           # ...or SPY closed below its 5-day SMA
+                           # ...or SPY or QQQ closed below its 5-day SMA
 EXTREME_50PCT = 20         # 20+ stocks moving 50% in a month is an extreme
 T2108_LO, T2108_HI = 20, 70
 
@@ -188,7 +188,7 @@ def get_prices(tickers: list[str], full: bool) -> tuple[pd.DataFrame, pd.DataFra
     CACHE.write_bytes(pickle.dumps({"close": close, "vol": vol}))
 
     idx = pd.DataFrame(index=close.index)
-    for col, sym in (("spx", "^GSPC"), ("spy", "SPY")):
+    for col, sym in (("spx", "^GSPC"), ("spy", "SPY"), ("qqq", "QQQ")):
         d = yf.download(sym, period=HISTORY, auto_adjust=True, progress=False)["Close"]
         idx[col] = d.squeeze().reindex(close.index)
     return close, vol, idx
@@ -207,7 +207,7 @@ def demo_prices(n_stocks=3000, n_days=400, seed=7):
     vol = pd.DataFrame(rng.lognormal(12.5, 1.0, (n_days, n_stocks)) * (1 + 15 * np.abs(ret)),
                        idx, close.columns)
     spx = pd.Series(4000 * np.exp(np.cumsum(mkt)), idx)
-    return close, vol, pd.DataFrame({"spx": spx, "spy": spx / 10})
+    return close, vol, pd.DataFrame({"spx": spx, "spy": spx / 10, "qqq": spx / 8})
 
 
 # ----------------------------------------------------------------------------- the monitor
@@ -257,12 +257,14 @@ def compute(close: pd.DataFrame, vol: pd.DataFrame, idx: pd.DataFrame) -> pd.Dat
         "spy_sma5": above_below(idx["spy"], idx["spy"].rolling(5).mean()),
         "spy_ema21": above_below(idx["spy"], idx["spy"].ewm(span=21, adjust=False).mean()),
         "spy_sma50": above_below(idx["spy"], idx["spy"].rolling(50).mean()),
+        "qqq_sma5": above_below(idx["qqq"], idx["qqq"].rolling(5).mean()),
+        "qqq_ema21": above_below(idx["qqq"], idx["qqq"].ewm(span=21, adjust=False).mean()),
     })
     mm["pbr"] = (mm["up25q"] / mm["dn25q"].replace(0, np.nan)).round(2)   # primary breadth ratio
     mm["phase"] = mm.apply(phase_of, axis=1)
-    # Risk On, but short-term breadth or SPY's 5-day trend is weak = cautious
+    # Risk On, but short-term breadth or the SPY/QQQ 5-day trend is weak = cautious
     mm["cautious"] = (mm["phase"] == "Risk On") & (
-        (mm["r10"] < CAUTION_R10) | (mm["spy_sma5"] == "Below"))
+        (mm["r10"] < CAUTION_R10) | (mm["spy_sma5"] == "Below") | (mm["qqq_sma5"] == "Below"))
     # need 65+ days of history before the quarter columns mean anything
     return mm.iloc[66:].dropna(subset=["r10"])
 
@@ -285,6 +287,8 @@ COLS = [  # key, header, group
     ("dn13_34", "Number of stocks down 13% + in 34 days", "s"),
     ("spy_ema21", "SPY vs 21-day EMA", "s"),
     ("spy_sma50", "SPY vs 50-day SMA", "s"),
+    ("qqq_sma5", "QQQ vs 5-day SMA", "s"),
+    ("qqq_ema21", "QQQ vs 21-day EMA", "s"),
     ("universe", "Stock universe (liquid)", "o"),
     ("t2108", "T2108 (% above 40-day MA)", "o"),
     ("spx", "S&P 500", "o"),
@@ -328,7 +332,7 @@ def cell_class(key: str, row: pd.Series) -> str:
         return "rd" if v >= EXTREME_50PCT else ""
     if key == "dn50m":                     # 20+ stocks down 50% in a month = washout (contrarian green)
         return "gb" if v >= EXTREME_50PCT else ""
-    if key in ("spy_sma5", "spy_ema21", "spy_sma50"):
+    if key in ("spy_sma5", "spy_ema21", "spy_sma50", "qqq_sma5", "qqq_ema21"):
         return {"Above": "gb", "Below": "pk"}.get(v, "")
     if key == "t2108":
         return "gb" if v <= T2108_LO else "rd" if v >= T2108_HI else ""
@@ -343,7 +347,7 @@ def state_html(row) -> str:
 
 
 def fmt(key, v):
-    if key in ("phase", "spy_sma5", "spy_ema21", "spy_sma50"):
+    if key in ("phase", "spy_sma5", "spy_ema21", "spy_sma50", "qqq_sma5", "qqq_ema21"):
         return v
     if pd.isna(v):
         return "–"
@@ -365,7 +369,7 @@ def to_html(mm: pd.DataFrame, rows: int, demo: bool) -> str:
     head1 = ('<tr><th rowspan="2" class="date d">Date</th>'
              '<th rowspan="2" class="d">Market state</th>'
              '<th colspan="7" class="grp p">Primary Breadth Indicators</th>'
-             '<th colspan="8" class="grp s">Secondary Breadth Indicators</th>'
+             '<th colspan="10" class="grp s">Secondary Breadth Indicators</th>'
              '<th colspan="3" class="grp o"></th></tr>')
     head2 = "<tr>" + "".join(f'<th class="{g}">{h}</th>' for k, h, g in COLS if k != "phase") + "</tr>"
 
@@ -374,7 +378,7 @@ def to_html(mm: pd.DataFrame, rows: int, demo: bool) -> str:
     for d, row in view.iterrows():
         sep = ' class="msep"' if prev_month and d.month != prev_month else ""
         prev_month = d.month
-        tds = "".join(f'<td class="{cell_class(k, row)}{" phase" if k in ("phase", "spy_sma5", "spy_ema21", "spy_sma50") else ""}">{state_html(row) if k == "phase" else fmt(k, row[k])}</td>'
+        tds = "".join(f'<td class="{cell_class(k, row)}{" phase" if k in ("phase", "spy_sma5", "spy_ema21", "spy_sma50", "qqq_sma5", "qqq_ema21") else ""}">{state_html(row) if k == "phase" else fmt(k, row[k])}</td>'
                       for k, _, _ in COLS)
         body.append(f"<tr{sep}><td class='date'>{d.month}/{d.day}/{d.year}</td>{tds}</tr>")
 
@@ -446,7 +450,7 @@ def to_html(mm: pd.DataFrame, rows: int, demo: bool) -> str:
  Primary breadth ratio = up 25% quarter ÷ down 25% quarter.<br>
  <b>Market state:</b> count the coloured cells in the seven Primary Breadth columns.
  More green than red = Risk On, more red than green = Risk Off, equal = Neutral.
- <span class="tag" style="margin-left:0">Cautious</span> = Risk On, but the 10-day ratio is below {CAUTION_R10} or SPY is below its 5-day SMA.
+ <span class="tag" style="margin-left:0">Cautious</span> = Risk On, but the 10-day ratio is below {CAUTION_R10} or SPY or QQQ is below its 5-day SMA.
 </div>
 </body></html>"""
 
