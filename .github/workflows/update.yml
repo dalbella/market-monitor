@@ -2,8 +2,12 @@ name: Update Market Monitor
 
 on:
   schedule:
-    - cron: "30 22 * * 1-5"   # 22:30 UTC, Monday-Friday (after the US close)
+    - cron: "30 22 * * 1-5"   # 22:30 UTC, Mon-Fri: after the US close
+    - cron: "30 15 * * 1-5"   # 15:30 UTC, Mon-Fri: about 1 hour after the US open (winter time)
   workflow_dispatch:           # adds a "Run workflow" button
+  push:                        # rebuild automatically when the script is uploaded
+    paths:
+      - market_monitor.py
 
 permissions:
   contents: read
