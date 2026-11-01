@@ -209,6 +209,10 @@ def demo_prices(n_stocks=3000, n_days=400, seed=7):
 
 
 # ----------------------------------------------------------------------------- the monitor
+def above_below(price: pd.Series, avg: pd.Series) -> np.ndarray:
+    return np.where(price.isna() | avg.isna(), "", np.where(price > avg, "Above", "Below"))
+
+
 def compute(close: pd.DataFrame, vol: pd.DataFrame, idx: pd.DataFrame) -> pd.DataFrame:
     close = close.where(close > 0)
     liquid = (close >= MIN_PRICE) & (vol.rolling(20, min_periods=15).mean() >= MIN_AVG_VOLUME)
@@ -248,8 +252,9 @@ def compute(close: pd.DataFrame, vol: pd.DataFrame, idx: pd.DataFrame) -> pd.Dat
         "universe": universe,
         "t2108": (100 * above40 / universe.replace(0, np.nan)).round(1),
         "spx": idx["spx"].round(2),
-        "spy_sma5": np.where(idx["spy"].isna(), "",
-                             np.where(idx["spy"] > idx["spy"].rolling(5).mean(), "Above", "Below")),
+        "spy_sma5": above_below(idx["spy"], idx["spy"].rolling(5).mean()),
+        "spy_ema21": above_below(idx["spy"], idx["spy"].ewm(span=21, adjust=False).mean()),
+        "spy_sma50": above_below(idx["spy"], idx["spy"].rolling(50).mean()),
     })
     mm["pbr"] = (mm["up25q"] / mm["dn25q"].replace(0, np.nan)).round(2)   # primary breadth ratio
     mm["phase"] = mm.apply(phase_of, axis=1)
@@ -273,6 +278,8 @@ COLS = [  # key, header, group
     ("dn50m", "Number of stocks down 50% + in a month", "s"),
     ("up13_34", "Number of stocks up 13% + in 34 days", "s"),
     ("dn13_34", "Number of stocks down 13% + in 34 days", "s"),
+    ("spy_ema21", "SPY vs 21-day EMA", "s"),
+    ("spy_sma50", "SPY vs 50-day SMA", "s"),
     ("universe", "Stock universe (liquid)", "o"),
     ("t2108", "T2108 (% above 40-day MA)", "o"),
     ("spx", "S&P 500", "o"),
@@ -316,7 +323,7 @@ def cell_class(key: str, row: pd.Series) -> str:
         return "rd" if v >= EXTREME_50PCT else ""
     if key == "dn50m":                     # 20+ stocks down 50% in a month = washout (contrarian green)
         return "gb" if v >= EXTREME_50PCT else ""
-    if key == "spy_sma5":
+    if key in ("spy_sma5", "spy_ema21", "spy_sma50"):
         return {"Above": "gb", "Below": "pk"}.get(v, "")
     if key == "t2108":
         return "gb" if v <= T2108_LO else "rd" if v >= T2108_HI else ""
@@ -324,7 +331,7 @@ def cell_class(key: str, row: pd.Series) -> str:
 
 
 def fmt(key, v):
-    if key in ("phase", "spy_sma5"):
+    if key in ("phase", "spy_sma5", "spy_ema21", "spy_sma50"):
         return v
     if pd.isna(v):
         return "–"
@@ -346,7 +353,7 @@ def to_html(mm: pd.DataFrame, rows: int, demo: bool) -> str:
     head1 = ('<tr><th rowspan="2" class="date d">Date</th>'
              '<th rowspan="2" class="d">Market state</th>'
              '<th colspan="7" class="grp p">Primary Breadth Indicators</th>'
-             '<th colspan="6" class="grp s">Secondary Breadth Indicators</th>'
+             '<th colspan="8" class="grp s">Secondary Breadth Indicators</th>'
              '<th colspan="3" class="grp o"></th></tr>')
     head2 = "<tr>" + "".join(f'<th class="{g}">{h}</th>' for k, h, g in COLS if k != "phase") + "</tr>"
 
@@ -355,7 +362,7 @@ def to_html(mm: pd.DataFrame, rows: int, demo: bool) -> str:
     for d, row in view.iterrows():
         sep = ' class="msep"' if prev_month and d.month != prev_month else ""
         prev_month = d.month
-        tds = "".join(f'<td class="{cell_class(k, row)}{" phase" if k in ("phase", "spy_sma5") else ""}">{fmt(k, row[k])}</td>'
+        tds = "".join(f'<td class="{cell_class(k, row)}{" phase" if k in ("phase", "spy_sma5", "spy_ema21", "spy_sma50") else ""}">{fmt(k, row[k])}</td>'
                       for k, _, _ in COLS)
         body.append(f"<tr{sep}><td class='date'>{d.month}/{d.day}/{d.year}</td>{tds}</tr>")
 
