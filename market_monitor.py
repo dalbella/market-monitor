@@ -68,6 +68,8 @@ TICKER_CACHE = Path("mm_tickers.txt")
 # Colour thresholds (tweak to taste)
 THRUST_4PCT = 300          # 300+ stocks up (or down) 4% in a day = notable thrust
 RATIO_HI, RATIO_LO = 2.0, 0.5
+CAUTION_R10 = 1.5          # Risk On is "Cautious" if the 10-day ratio is below this...
+                           # ...or SPY closed below its 5-day SMA
 EXTREME_50PCT = 20         # 20+ stocks moving 50% in a month is an extreme
 T2108_LO, T2108_HI = 20, 70
 
@@ -258,8 +260,9 @@ def compute(close: pd.DataFrame, vol: pd.DataFrame, idx: pd.DataFrame) -> pd.Dat
     })
     mm["pbr"] = (mm["up25q"] / mm["dn25q"].replace(0, np.nan)).round(2)   # primary breadth ratio
     mm["phase"] = mm.apply(phase_of, axis=1)
-    # Risk On without a 300+ "up 4%" thrust day = Risk On, but cautious
-    mm["cautious"] = (mm["phase"] == "Risk On") & (mm["up4"] < THRUST_4PCT)
+    # Risk On, but short-term breadth or SPY's 5-day trend is weak = cautious
+    mm["cautious"] = (mm["phase"] == "Risk On") & (
+        (mm["r10"] < CAUTION_R10) | (mm["spy_sma5"] == "Below"))
     # need 65+ days of history before the quarter columns mean anything
     return mm.iloc[66:].dropna(subset=["r10"])
 
@@ -437,7 +440,7 @@ def to_html(mm: pd.DataFrame, rows: int, demo: bool) -> str:
  Primary breadth ratio = up 25% quarter ÷ down 25% quarter.<br>
  <b>Market state:</b> count the coloured cells in the seven Primary Breadth columns.
  More green than red = Risk On, more red than green = Risk Off, equal = Neutral.
- <span class="tag" style="margin-left:0">Cautious</span> = Risk On, but fewer than {THRUST_4PCT} stocks were up 4%+ that day.
+ <span class="tag" style="margin-left:0">Cautious</span> = Risk On, but the 10-day ratio is below {CAUTION_R10} or SPY is below its 5-day SMA.
 </div>
 </body></html>"""
 
